@@ -1,0 +1,72 @@
+From b9b0173409df73e235da2aa0dae5edd21fb55967 Mon Sep 17 00:00:00 2001
+From: Olaf Meeuwissen <paddy-hack@member.fsf.org>
+Date: Mon, 27 Apr 2020 18:48:29 +0900
+Subject: [PATCH] epsonds: Prevent possible buffer overflow when reading image
+ data
+
+Addresses GHSL-2020-084, re #279.
+---
+ backend/epsonds-cmd.c |  5 +++++
+ backend/epsonds.c     | 12 +++++++-----
+ backend/epsonds.h     |  1 +
+ 3 files changed, 13 insertions(+), 5 deletions(-)
+
+diff --git a/backend/epsonds-cmd.c b/backend/epsonds-cmd.c
+index 9a4db3080..c182aa51a 100644
+--- a/backend/epsonds-cmd.c
++++ b/backend/epsonds-cmd.c
+@@ -876,6 +876,11 @@ esci2_img(struct epsonds_scanner *s, SANE_Int *length)
+ 		return parse_status;
+ 	}
+ 
++	/* more data than was accounted for in s->buf */
++	if (more > s->bsz) {
++		return SANE_STATUS_IO_ERROR;
++	}
++
+ 	/* ALWAYS read image data */
+ 	if (s->hw->connection == SANE_EPSONDS_NET) {
+ 		epsonds_net_request_read(s, more);
+diff --git a/backend/epsonds.c b/backend/epsonds.c
+index ff5d68106..fb9694a88 100644
+--- a/backend/epsonds.c
++++ b/backend/epsonds.c
+@@ -1230,16 +1230,18 @@ sane_start(SANE_Handle handle)
+ 	if (s->line_buffer == NULL)
+ 		return SANE_STATUS_NO_MEM;
+ 
+-	/* ring buffer for front page, twice bsz */
++	/* transfer buffer size, bsz */
+ 	/* XXX read value from scanner */
+-	status = eds_ring_init(&s->front, (65536 * 4) * 2);
++	s->bsz = (65536 * 4);
++
++	/* ring buffer for front page */
++	status = eds_ring_init(&s->front, s->bsz * 2);
+ 	if (status != SANE_STATUS_GOOD) {
+ 		return status;
+ 	}
+ 
+-	/* transfer buffer, bsz */
+-	/* XXX read value from scanner */
+-	s->buf = realloc(s->buf, 65536 * 4);
++	/* transfer buffer */
++	s->buf = realloc(s->buf, s->bsz);
+ 	if (s->buf == NULL)
+ 		return SANE_STATUS_NO_MEM;
+ 
+diff --git a/backend/epsonds.h b/backend/epsonds.h
+index 0427ef3b4..401b0f32c 100644
+--- a/backend/epsonds.h
++++ b/backend/epsonds.h
+@@ -160,6 +160,7 @@ struct epsonds_scanner
+ 	Option_Value val[NUM_OPTIONS];
+ 	SANE_Parameters params;
+ 
++	size_t bsz;		/* transfer buffer size */
+ 	SANE_Byte *buf, *line_buffer;
+ 	ring_buffer *current, front, back;
+ 
+-- 
+2.25.4
+
